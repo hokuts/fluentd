@@ -17,8 +17,11 @@
 module Fluent
   module Test
     class FilterTestDriver < TestDriver
-      def initialize(klass, &block)
+      def initialize(klass, tag = 'filter.test', &block)
         super(klass, &block)
+        @tag = tag
+        @events = {}
+        @result = nil
       end
 
       def filter(tag, time, record)
@@ -27,6 +30,33 @@ module Fluent
 
       def filter_stream(tag, es)
         @instance.filter_stream(tag, es)
+      end
+
+      def emit(record, time = Engine.now, tag = @tag)
+        @events[tag] ||= MultiEventStream.new
+        @events[tag].add(time, record)
+      end
+
+      def emits(events)
+        events.each { |record, time, tag|
+          emit(record, time.nil? ? Engine.now : time, tag.nil? ? @tag : tag)
+        }
+      end
+
+      # Almost filters don't use a thread so default is 0. It reduces test time.
+      def run(num_waits = 0, &block)
+        @result = MultiEventStream.new
+        super(num_waits) {
+          block.call if block
+
+          @events.each { |tag, es|
+            processed = filter_stream(tag, es)
+            processed.each { |time, record|
+              @result.add(time, record)
+            }
+          }
+        }
+        @result
       end
     end
   end
